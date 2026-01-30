@@ -243,24 +243,48 @@ Business-level aggregates optimized for reporting and ML.
    Repos > Add Repo > https://github.com/your-org/customer360
    ```
 
-2. **Import the notebook**:
-   ```
-   notebooks/customer_360_medallion_pipeline.py
-   ```
-
-3. **Update configuration** (first code cell):
+2. **Update configuration** in `notebooks/config.py`:
    ```python
    BASE_RAW_PATH = "/Workspace/Repos/customer360/data"  # Your data path
    CATALOG_NAME = "customer360_demo"                     # Your catalog
    SCHEMA_NAME = "analytics"                             # Your schema
+   USE_UNITY_CATALOG = True                              # Or False for Hive
    ```
 
-4. **Run All Cells** - The notebook will:
-   - Discover and display CSV schemas
-   - Create Bronze Delta tables
-   - Transform to Silver layer
-   - Build Gold analytics tables
-   - Display sample visualizations
+3. **Run the pipelines in order**:
+   ```
+   Step 1: Run notebooks/01_bronze_ingestion.py
+   Step 2: Run notebooks/02_silver_transformation.py
+   Step 3: Run notebooks/03_gold_analytics.py
+   ```
+
+4. **Each pipeline produces**:
+   - **Bronze**: Raw Delta tables with lineage metadata
+   - **Silver**: Cleaned, validated, and enriched tables
+   - **Gold**: Analytics-ready aggregations and KPIs
+
+### Pipeline Execution Order
+
+```
+┌─────────────────────┐
+│   config.py         │  ◄── Shared configuration (run first or %run ./config)
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│ 01_bronze_ingestion │  ◄── CSV → Bronze Delta tables
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│ 02_silver_transform │  ◄── Bronze → Silver (cleaned/unified)
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│ 03_gold_analytics   │  ◄── Silver → Gold (aggregations)
+└─────────────────────┘
+```
 
 ---
 
@@ -398,9 +422,9 @@ CSV Files
 
 ```
 customer360/
-├── README.md                           # This file
+├── README.md                              # This documentation
 ├── data/
-│   ├── 360/                            # Core customer 360 CSVs
+│   ├── 360/                               # Core customer 360 CSVs
 │   │   ├── Customers.csv
 │   │   ├── Products.csv
 │   │   ├── Stores.csv
@@ -410,12 +434,65 @@ customer360/
 │   │   ├── LoyaltyAccounts.csv
 │   │   ├── LoyaltyTransactions.csv
 │   │   └── CustomerServiceInteractions.csv
-│   ├── Customer360Insights.csv         # Comprehensive insights
+│   ├── Customer360Insights.csv            # Comprehensive insights
 │   └── shopping_behaviour/
 │       └── customer_transactions_final.csv
 └── notebooks/
-    └── customer_360_medallion_pipeline.py  # Main Databricks notebook
+    ├── config.py                          # Shared configuration & utilities
+    ├── 01_bronze_ingestion.py             # Bronze layer pipeline
+    ├── 02_silver_transformation.py        # Silver layer pipeline
+    └── 03_gold_analytics.py               # Gold layer pipeline
 ```
+
+## Pipeline Details
+
+### config.py - Shared Configuration
+
+Contains all configurable parameters used across pipelines:
+- `BASE_RAW_PATH`: Location of source CSV files
+- `CATALOG_NAME` / `SCHEMA_NAME`: Unity Catalog settings
+- `DATABASE_NAME`: Legacy Hive metastore database
+- `USE_UNITY_CATALOG`: Toggle between UC and Hive
+- `FILE_TO_TABLE_MAPPING`: CSV to table name mappings
+- Helper functions: `get_full_table_name()`, `setup_database()`
+
+### 01_bronze_ingestion.py - Bronze Layer
+
+**Purpose**: Ingest raw CSVs into Delta tables with minimal transformation.
+
+**Features**:
+- Auto-discovers CSV files in configured path
+- Infers schemas and displays summary report
+- Adds lineage metadata columns (`_source_file`, `_ingestion_timestamp`)
+- Supports overwrite (initial) and append (incremental) modes
+
+**Output Tables**: 11 Bronze tables (one per CSV)
+
+### 02_silver_transformation.py - Silver Layer
+
+**Purpose**: Clean, validate, and enrich data for analytics.
+
+**Features**:
+- Data quality checks (nulls, duplicates)
+- Schema standardization (snake_case naming)
+- Type casting and validation
+- Unifies online + in-store transactions
+- Adds derived columns (age_group, income_bracket, etc.)
+
+**Output Tables**: 7 Silver tables
+
+### 03_gold_analytics.py - Gold Layer
+
+**Purpose**: Create business-ready aggregated tables.
+
+**Features**:
+- Customer 360 unified profile
+- RFM segmentation with churn risk
+- Customer Lifetime Value estimation
+- Campaign performance analytics
+- Daily KPI metrics
+
+**Output Tables**: 5 Gold tables
 
 ---
 
