@@ -15,13 +15,36 @@
 
 # COMMAND ----------
 
+# # Drop all tables in the schema, then drop all volumes, then drop the schema itself
+
+# catalog = "customer360_demo"
+# schema = "default"
+
+# # Drop all tables in the schema
+# tables_df = spark.sql(f"SHOW TABLES IN {catalog}.{schema}")
+# tables = [row.tableName for row in tables_df.collect()]
+# for table in tables:
+#     spark.sql(f"DROP TABLE IF EXISTS {catalog}.{schema}.{table}")
+
+# # Drop all volumes in the schema
+# volumes_df = spark.sql(f"SHOW VOLUMES IN {catalog}.{schema}")
+# volumes = [row.volume_name for row in volumes_df.collect()]
+# for volume in volumes:
+#     spark.sql(f"DROP VOLUME IF EXISTS {catalog}.{schema}.{volume}")
+
+# # Drop the schema
+# spark.sql(f"DROP SCHEMA IF EXISTS {catalog}.{schema}")
+
+# COMMAND ----------
+
 # =============================================================================
 # ENVIRONMENT CONFIGURATION
 # =============================================================================
 
 # Base path where raw CSV files are stored
 # Adjust based on your Databricks environment
-BASE_RAW_PATH = "/Workspace/Repos/customer360/data"
+BASE_RAW_PATH = "/Volumes/mydatabricks/customer360/data_360/data/"
+
 
 # Alternative paths for different environments:
 # BASE_RAW_PATH = "/dbfs/mnt/datalake/raw/customer360"   # DBFS mount
@@ -42,7 +65,7 @@ DATABASE_NAME = "customer360_db"
 USE_UNITY_CATALOG = True
 
 # Delta table storage location (for external/unmanaged tables)
-DELTA_BASE_PATH = "/dbfs/mnt/delta/customer360"
+DELTA_BASE_PATH = "/Volumes/mydatabricks/customer360/data_360/delta/"
 
 # =============================================================================
 # DATA SOURCE PATHS

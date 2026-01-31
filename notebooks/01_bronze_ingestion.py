@@ -348,6 +348,46 @@ def run_bronze_ingestion(discovered_files: Dict[str, Dict]) -> Dict[str, Dict]:
 
 # COMMAND ----------
 
+# DBTITLE 1,Override setup_database to handle catalog creation
+# Workaround: Override setup_database() to handle catalog creation with storage location
+def setup_database():
+    """
+    Create the database/schema for the medallion layers.
+    Modified to handle Unity Catalog storage location requirement.
+    """
+    if USE_UNITY_CATALOG:
+        # Try to use existing catalog first, or create with managed location
+        try:
+            spark.sql(f"USE CATALOG {CATALOG_NAME}")
+            print(f"✅ Using existing catalog: {CATALOG_NAME}")
+        except:
+            # Catalog doesn't exist, try to create it with managed location
+            try:
+                spark.sql(f"CREATE CATALOG IF NOT EXISTS {CATALOG_NAME} MANAGED LOCATION '{DELTA_BASE_PATH}catalogs/{CATALOG_NAME}'")
+                print(f"✅ Created catalog: {CATALOG_NAME}")
+            except Exception as e:
+                print(f"⚠️ Could not create catalog. Please create '{CATALOG_NAME}' manually via UI or use an existing catalog.")
+                print(f"Error: {e}")
+                # Fallback to 'main' catalog if available
+                try:
+                    spark.sql("USE CATALOG main")
+                    print(f"✅ Falling back to 'main' catalog")
+                    # Update global CATALOG_NAME
+                    globals()['CATALOG_NAME'] = 'main'
+                except:
+                    raise Exception("Cannot create or access any catalog. Please create a catalog manually.")
+        
+        spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG_NAME}.{SCHEMA_NAME}")
+        spark.sql(f"USE CATALOG {CATALOG_NAME}")
+        spark.sql(f"USE SCHEMA {SCHEMA_NAME}")
+        print(f"✅ Using Unity Catalog: {CATALOG_NAME}.{SCHEMA_NAME}")
+    else:
+        spark.sql(f"CREATE DATABASE IF NOT EXISTS {DATABASE_NAME}")
+        spark.sql(f"USE {DATABASE_NAME}")
+        print(f"✅ Using database: {DATABASE_NAME}")
+
+# COMMAND ----------
+
 # Execute Bronze ingestion
 bronze_results = run_bronze_ingestion(discovered_schemas)
 
