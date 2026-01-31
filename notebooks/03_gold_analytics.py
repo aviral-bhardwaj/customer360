@@ -75,9 +75,36 @@ def save_gold_table(df: DataFrame, table_name: str) -> Tuple[str, int]:
     return full_table_name, row_count
 
 
+def table_exists(table_name: str, layer: str) -> bool:
+    """
+    Check if a table exists in the specified layer.
+
+    Args:
+        table_name: Base table name
+        layer: Layer name ('bronze', 'silver', 'gold')
+
+    Returns:
+        True if table exists, False otherwise
+    """
+    full_name = get_full_table_name(table_name, layer)
+    try:
+        spark.table(full_name).limit(1).collect()
+        return True
+    except Exception:
+        return False
+
+
 def read_silver_table(table_name: str) -> DataFrame:
-    """Read a Silver table by name."""
-    return spark.table(get_full_table_name(table_name, layer="silver"))
+    """
+    Read a Silver table by name.
+
+    Raises:
+        Exception: If table does not exist
+    """
+    full_name = get_full_table_name(table_name, layer="silver")
+    if not table_exists(table_name, "silver"):
+        raise Exception(f"Table {full_name} does not exist")
+    return spark.table(full_name)
 
 # COMMAND ----------
 
@@ -102,67 +129,104 @@ def build_gold_customer_360() -> DataFrame:
     - Service Interactions (support history)
 
     Returns:
-        Customer 360 DataFrame
+        Customer 360 DataFrame or None if required tables missing
     """
     print("🏗️  Building: gold_customer_360")
 
-    # Load Silver tables
+    # Load Silver tables with error handling
+    has_customers = False
+    has_transactions = False
+    has_loyalty = False
+    has_service = False
+
     try:
         customers = read_silver_table("customers")
         has_customers = True
-    except:
-        print("   ⚠️ silver_customers not found, using customer_insights")
-        has_customers = False
+        print("   ✓ Loaded: silver.customers")
+    except Exception as e:
+        print(f"   ⚠️ silver.customers not found: {e}")
 
-    transactions = read_silver_table("transactions")
-    loyalty = read_silver_table("loyalty")
-    service = read_silver_table("service_interactions")
+    try:
+        transactions = read_silver_table("transactions")
+        has_transactions = True
+        print("   ✓ Loaded: silver.transactions")
+    except Exception as e:
+        print(f"   ⚠️ silver.transactions not found: {e}")
 
-    # If no customers table, derive from customer_insights
+    try:
+        loyalty = read_silver_table("loyalty")
+        has_loyalty = True
+        print("   ✓ Loaded: silver.loyalty")
+    except Exception as e:
+        print(f"   ⚠️ silver.loyalty not found: {e}")
+
+    try:
+        service = read_silver_table("service_interactions")
+        has_service = True
+        print("   ✓ Loaded: silver.service_interactions")
+    except Exception as e:
+        print(f"   ⚠️ silver.service_interactions not found: {e}")
+
+    # If no customers table, try to derive from customer_insights
     if not has_customers:
-        insights = read_silver_table("customer_insights")
-        customers = insights \
-            .select("customer_id", "customer_name", "gender", "age", "age_group",
-                    "credit_score", "credit_tier", "monthly_income", "income_bracket",
-                    "country", "state", "city") \
-            .dropDuplicates(["customer_id"])
+        try:
+            insights = read_silver_table("customer_insights")
+            customers = insights \
+                .select("customer_id", "customer_name", "gender", "age", "age_group",
+                        "credit_score", "credit_tier", "monthly_income", "income_bracket",
+                        "country", "state", "city") \
+                .dropDuplicates(["customer_id"])
+            has_customers = True
+            print("   ✓ Derived customers from: silver.customer_insights")
+        except Exception as e:
+            print(f"   ❌ Cannot build Customer 360: No customer data available")
+            return None
+
+    # We need at least customers to build Customer 360
+    if not has_customers:
+        print("   ❌ Cannot build Customer 360: No customer data available")
+        return None
 
     # =========================================================================
-    # Aggregate Transaction Metrics
+    # Aggregate Transaction Metrics (if available)
     # =========================================================================
-    txn_metrics = transactions \
-        .groupBy("customer_id") \
-        .agg(
-            F.count("*").alias("total_transactions"),
-            F.sum("amount").alias("total_spend"),
-            F.avg("amount").alias("avg_transaction_value"),
-            F.max("amount").alias("max_transaction_value"),
-            F.min("amount").alias("min_transaction_value"),
-            F.max("transaction_date").alias("last_transaction_date"),
-            F.min("transaction_date").alias("first_transaction_date"),
-            F.countDistinct("transaction_month").alias("active_months"),
-            F.countDistinct("channel").alias("channels_used"),
-            F.sum(F.when(F.col("channel") == "online", 1).otherwise(0)).alias("online_transactions"),
-            F.sum(F.when(F.col("channel") == "instore", 1).otherwise(0)).alias("instore_transactions"),
-            F.sum(F.when(F.col("channel") == "online", F.col("amount")).otherwise(0)).alias("online_spend"),
-            F.sum(F.when(F.col("channel") == "instore", F.col("amount")).otherwise(0)).alias("instore_spend"),
-            F.sum(F.when(F.col("is_weekend"), 1).otherwise(0)).alias("weekend_transactions")
-        ) \
-        .withColumn("days_since_last_transaction",
-            F.datediff(F.current_date(), F.col("last_transaction_date"))) \
-        .withColumn("customer_tenure_days",
-            F.datediff(F.current_date(), F.col("first_transaction_date"))) \
-        .withColumn("online_spend_pct",
-            F.when(F.col("total_spend") > 0,
-                   F.round(F.col("online_spend") / F.col("total_spend") * 100, 2))
-            .otherwise(0))
+    txn_metrics = None
+    if has_transactions:
+        txn_metrics = transactions \
+            .groupBy("customer_id") \
+            .agg(
+                F.count("*").alias("total_transactions"),
+                F.sum("amount").alias("total_spend"),
+                F.avg("amount").alias("avg_transaction_value"),
+                F.max("amount").alias("max_transaction_value"),
+                F.min("amount").alias("min_transaction_value"),
+                F.max("transaction_date").alias("last_transaction_date"),
+                F.min("transaction_date").alias("first_transaction_date"),
+                F.countDistinct("transaction_month").alias("active_months"),
+                F.countDistinct("channel").alias("channels_used"),
+                F.sum(F.when(F.col("channel") == "online", 1).otherwise(0)).alias("online_transactions"),
+                F.sum(F.when(F.col("channel") == "instore", 1).otherwise(0)).alias("instore_transactions"),
+                F.sum(F.when(F.col("channel") == "online", F.col("amount")).otherwise(0)).alias("online_spend"),
+                F.sum(F.when(F.col("channel") == "instore", F.col("amount")).otherwise(0)).alias("instore_spend"),
+                F.sum(F.when(F.col("is_weekend"), 1).otherwise(0)).alias("weekend_transactions")
+            ) \
+            .withColumn("days_since_last_transaction",
+                F.datediff(F.current_date(), F.col("last_transaction_date"))) \
+            .withColumn("customer_tenure_days",
+                F.datediff(F.current_date(), F.col("first_transaction_date"))) \
+            .withColumn("online_spend_pct",
+                F.when(F.col("total_spend") > 0,
+                       F.round(F.col("online_spend") / F.col("total_spend") * 100, 2))
+                .otherwise(0))
 
     # =========================================================================
-    # Aggregate Loyalty Metrics
+    # Aggregate Loyalty Metrics (if available)
     # =========================================================================
-    loyalty_metrics = loyalty \
-        .groupBy("customer_id") \
-        .agg(
+    loyalty_metrics = None
+    if has_loyalty:
+        loyalty_metrics = loyalty \
+            .groupBy("customer_id") \
+            .agg(
             F.max("total_points").alias("loyalty_points"),
             F.max("tier_level").alias("loyalty_tier"),
             F.max("tier_rank").alias("loyalty_tier_rank"),
@@ -171,63 +235,93 @@ def build_gold_customer_360() -> DataFrame:
         )
 
     # =========================================================================
-    # Aggregate Service Interaction Metrics
+    # Aggregate Service Interaction Metrics (if available)
     # =========================================================================
-    service_metrics = service \
-        .groupBy("customer_id") \
-        .agg(
-            F.count("*").alias("total_support_tickets"),
-            F.sum(F.when(F.col("is_resolved"), 1).otherwise(0)).alias("resolved_tickets"),
-            F.sum(F.when(F.col("is_escalated"), 1).otherwise(0)).alias("escalated_tickets"),
-            F.sum(F.when(F.col("is_pending"), 1).otherwise(0)).alias("pending_tickets"),
-            F.max("interaction_date").alias("last_support_date"),
-            F.countDistinct("issue_type").alias("unique_issue_types")
-        ) \
-        .withColumn("support_resolution_rate",
-            F.when(F.col("total_support_tickets") > 0,
-                   F.round(F.col("resolved_tickets") / F.col("total_support_tickets") * 100, 2))
-            .otherwise(None)) \
-        .withColumn("days_since_last_support",
-            F.datediff(F.current_date(), F.col("last_support_date")))
+    service_metrics = None
+    if has_service:
+        service_metrics = service \
+            .groupBy("customer_id") \
+            .agg(
+                F.count("*").alias("total_support_tickets"),
+                F.sum(F.when(F.col("is_resolved"), 1).otherwise(0)).alias("resolved_tickets"),
+                F.sum(F.when(F.col("is_escalated"), 1).otherwise(0)).alias("escalated_tickets"),
+                F.sum(F.when(F.col("is_pending"), 1).otherwise(0)).alias("pending_tickets"),
+                F.max("interaction_date").alias("last_support_date"),
+                F.countDistinct("issue_type").alias("unique_issue_types")
+            ) \
+            .withColumn("support_resolution_rate",
+                F.when(F.col("total_support_tickets") > 0,
+                       F.round(F.col("resolved_tickets") / F.col("total_support_tickets") * 100, 2))
+                .otherwise(None)) \
+            .withColumn("days_since_last_support",
+                F.datediff(F.current_date(), F.col("last_support_date")))
 
     # =========================================================================
-    # Join All Metrics
+    # Join All Metrics (only join metrics that are available)
     # =========================================================================
-    customer_360 = customers \
-        .join(txn_metrics, "customer_id", "left") \
-        .join(loyalty_metrics, "customer_id", "left") \
-        .join(service_metrics, "customer_id", "left")
+    customer_360 = customers
+
+    if txn_metrics is not None:
+        customer_360 = customer_360.join(txn_metrics, "customer_id", "left")
+
+    if loyalty_metrics is not None:
+        customer_360 = customer_360.join(loyalty_metrics, "customer_id", "left")
+
+    if service_metrics is not None:
+        customer_360 = customer_360.join(service_metrics, "customer_id", "left")
 
     # =========================================================================
     # Add Derived Fields
     # =========================================================================
-    customer_360 = customer_360 \
-        .withColumn("is_active",
-            F.when(F.col("days_since_last_transaction") <= 90, True).otherwise(False)) \
-        .withColumn("preferred_channel",
-            F.when(F.col("online_transactions") > F.col("instore_transactions"), "Online")
-             .when(F.col("instore_transactions") > F.col("online_transactions"), "In-Store")
-             .when((F.col("online_transactions") > 0) & (F.col("instore_transactions") > 0), "Omnichannel")
-             .otherwise("Unknown")) \
-        .withColumn("engagement_level",
-            F.when(F.col("total_transactions") >= 10, "High")
-             .when(F.col("total_transactions") >= 5, "Medium")
-             .when(F.col("total_transactions") >= 1, "Low")
-             .otherwise("None")) \
-        .withColumn("has_support_issues",
-            F.col("total_support_tickets") > 0) \
-        .withColumn("_gold_timestamp", F.current_timestamp())
+    # Add derived fields (conditionally based on available columns)
+    customer_360 = customer_360.withColumn("_gold_timestamp", F.current_timestamp())
+
+    # Transaction-based fields (if transactions were loaded)
+    if has_transactions:
+        customer_360 = customer_360 \
+            .withColumn("is_active",
+                F.when(F.col("days_since_last_transaction") <= 90, True).otherwise(False)) \
+            .withColumn("preferred_channel",
+                F.when(F.col("online_transactions") > F.col("instore_transactions"), "Online")
+                 .when(F.col("instore_transactions") > F.col("online_transactions"), "In-Store")
+                 .when((F.col("online_transactions") > 0) & (F.col("instore_transactions") > 0), "Omnichannel")
+                 .otherwise("Unknown")) \
+            .withColumn("engagement_level",
+                F.when(F.col("total_transactions") >= 10, "High")
+                 .when(F.col("total_transactions") >= 5, "Medium")
+                 .when(F.col("total_transactions") >= 1, "Low")
+                 .otherwise("None"))
+    else:
+        customer_360 = customer_360 \
+            .withColumn("is_active", F.lit(None).cast("boolean")) \
+            .withColumn("preferred_channel", F.lit("Unknown")) \
+            .withColumn("engagement_level", F.lit("None"))
+
+    # Service-based fields (if service interactions were loaded)
+    if has_service:
+        customer_360 = customer_360 \
+            .withColumn("has_support_issues", F.col("total_support_tickets") > 0)
+    else:
+        customer_360 = customer_360 \
+            .withColumn("has_support_issues", F.lit(False))
 
     # Fill nulls for numeric metrics
-    customer_360 = customer_360.fillna({
-        "total_transactions": 0,
-        "total_spend": 0.0,
-        "avg_transaction_value": 0.0,
-        "loyalty_points": 0,
-        "total_support_tickets": 0,
-        "online_transactions": 0,
-        "instore_transactions": 0
-    })
+    fill_values = {}
+    if has_transactions:
+        fill_values.update({
+            "total_transactions": 0,
+            "total_spend": 0.0,
+            "avg_transaction_value": 0.0,
+            "online_transactions": 0,
+            "instore_transactions": 0
+        })
+    if has_loyalty:
+        fill_values["loyalty_points"] = 0
+    if has_service:
+        fill_values["total_support_tickets"] = 0
+
+    if fill_values:
+        customer_360 = customer_360.fillna(fill_values)
 
     return customer_360
 
@@ -240,8 +334,12 @@ setup_layer_schema("gold")
 
 # Build and save Customer 360
 customer_360_df = build_gold_customer_360()
-c360_table, c360_rows = save_gold_table(customer_360_df, "customer_360")
-print(f"   ✅ Saved: {c360_table} ({c360_rows:,} rows)")
+if customer_360_df is not None:
+    c360_table, c360_rows = save_gold_table(customer_360_df, "customer_360")
+    print(f"   ✅ Saved: {c360_table} ({c360_rows:,} rows)")
+else:
+    print("   ❌ Customer 360 table not created - missing required Silver tables")
+    c360_table, c360_rows = None, 0
 
 # COMMAND ----------
 
@@ -379,9 +477,14 @@ def build_gold_customer_segments(customer_360: DataFrame) -> DataFrame:
 # COMMAND ----------
 
 # Build and save Customer Segments
-segments_df = build_gold_customer_segments(customer_360_df)
-seg_table, seg_rows = save_gold_table(segments_df, "customer_segments")
-print(f"   ✅ Saved: {seg_table} ({seg_rows:,} rows)")
+if customer_360_df is not None:
+    segments_df = build_gold_customer_segments(customer_360_df)
+    seg_table, seg_rows = save_gold_table(segments_df, "customer_segments")
+    print(f"   ✅ Saved: {seg_table} ({seg_rows:,} rows)")
+else:
+    print("   ⏭️ Skipping Customer Segments - Customer 360 not available")
+    segments_df = None
+    seg_table, seg_rows = None, 0
 
 # COMMAND ----------
 
@@ -456,9 +559,14 @@ def build_gold_customer_clv(customer_360: DataFrame) -> DataFrame:
 # COMMAND ----------
 
 # Build and save Customer CLV
-clv_df = build_gold_customer_clv(customer_360_df)
-clv_table, clv_rows = save_gold_table(clv_df, "customer_clv")
-print(f"   ✅ Saved: {clv_table} ({clv_rows:,} rows)")
+if customer_360_df is not None:
+    clv_df = build_gold_customer_clv(customer_360_df)
+    clv_table, clv_rows = save_gold_table(clv_df, "customer_clv")
+    print(f"   ✅ Saved: {clv_table} ({clv_rows:,} rows)")
+else:
+    print("   ⏭️ Skipping Customer CLV - Customer 360 not available")
+    clv_df = None
+    clv_table, clv_rows = None, 0
 
 # COMMAND ----------
 
@@ -556,11 +664,15 @@ def build_gold_daily_metrics() -> DataFrame:
     - Channel breakdown
 
     Returns:
-        Daily metrics DataFrame
+        Daily metrics DataFrame or None if transactions not available
     """
     print("🏗️  Building: gold_daily_metrics")
 
-    transactions = read_silver_table("transactions")
+    try:
+        transactions = read_silver_table("transactions")
+    except Exception as e:
+        print(f"   ⚠️ silver.transactions not available: {e}")
+        return None
 
     daily_metrics = transactions \
         .groupBy("transaction_date") \
@@ -596,8 +708,12 @@ def build_gold_daily_metrics() -> DataFrame:
 
 # Build and save Daily Metrics
 daily_df = build_gold_daily_metrics()
-daily_table, daily_rows = save_gold_table(daily_df, "daily_metrics")
-print(f"   ✅ Saved: {daily_table} ({daily_rows:,} rows)")
+if daily_df is not None:
+    daily_table, daily_rows = save_gold_table(daily_df, "daily_metrics")
+    print(f"   ✅ Saved: {daily_table} ({daily_rows:,} rows)")
+else:
+    print("   ⏭️ Skipping Daily Metrics - transactions not available")
+    daily_table, daily_rows = None, 0
 
 # COMMAND ----------
 
@@ -615,12 +731,26 @@ print()
 
 print("📋 GOLD TABLES CREATED:")
 print("-" * 80)
-print(f"  • {c360_table} ({c360_rows:,} rows) - Unified customer profile")
-print(f"  • {seg_table} ({seg_rows:,} rows) - RFM segmentation")
-print(f"  • {clv_table} ({clv_rows:,} rows) - Customer lifetime value")
+if c360_table:
+    print(f"  • {c360_table} ({c360_rows:,} rows) - Unified customer profile")
+else:
+    print("  • ❌ gold.customer_360 - NOT CREATED (missing Silver tables)")
+if seg_table:
+    print(f"  • {seg_table} ({seg_rows:,} rows) - RFM segmentation")
+else:
+    print("  • ❌ gold.customer_segments - NOT CREATED")
+if clv_table:
+    print(f"  • {clv_table} ({clv_rows:,} rows) - Customer lifetime value")
+else:
+    print("  • ❌ gold.customer_clv - NOT CREATED")
 if campaign_df is not None:
     print(f"  • {camp_table} ({camp_rows:,} rows) - Campaign performance")
-print(f"  • {daily_table} ({daily_rows:,} rows) - Daily metrics")
+else:
+    print("  • ❌ gold.campaign_performance - NOT CREATED (missing silver.customer_insights)")
+if daily_table:
+    print(f"  • {daily_table} ({daily_rows:,} rows) - Daily metrics")
+else:
+    print("  • ❌ gold.daily_metrics - NOT CREATED (missing silver.transactions)")
 
 # COMMAND ----------
 
@@ -634,14 +764,17 @@ print(f"  • {daily_table} ({daily_rows:,} rows) - Daily metrics")
 
 # COMMAND ----------
 
-print("📊 Top Customers by Total Spend:")
-spark.table(get_full_table_name("customer_360", "gold")) \
-    .select("customer_id", "customer_name", "total_transactions",
-            F.round("total_spend", 2).alias("total_spend"),
-            "loyalty_tier", "preferred_channel", "is_active") \
-    .orderBy(F.desc("total_spend")) \
-    .limit(10) \
-    .show(truncate=False)
+if c360_table:
+    print("📊 Top Customers by Total Spend:")
+    spark.table(get_full_table_name("customer_360", "gold")) \
+        .select("customer_id", "customer_name", "total_transactions",
+                F.round("total_spend", 2).alias("total_spend"),
+                "loyalty_tier", "preferred_channel", "is_active") \
+        .orderBy(F.desc("total_spend")) \
+        .limit(10) \
+        .show(truncate=False)
+else:
+    print("⏭️ Skipping Customer 360 sample - table not created")
 
 # COMMAND ----------
 
@@ -650,15 +783,18 @@ spark.table(get_full_table_name("customer_360", "gold")) \
 
 # COMMAND ----------
 
-print("📊 Customer Segment Distribution:")
-spark.table(get_full_table_name("customer_segments", "gold")) \
-    .groupBy("customer_segment", "churn_risk") \
-    .agg(
-        F.count("*").alias("customer_count"),
-        F.round(F.avg("monetary"), 2).alias("avg_spend")
-    ) \
-    .orderBy(F.desc("customer_count")) \
-    .show(truncate=False)
+if seg_table:
+    print("📊 Customer Segment Distribution:")
+    spark.table(get_full_table_name("customer_segments", "gold")) \
+        .groupBy("customer_segment", "churn_risk") \
+        .agg(
+            F.count("*").alias("customer_count"),
+            F.round(F.avg("monetary"), 2).alias("avg_spend")
+        ) \
+        .orderBy(F.desc("customer_count")) \
+        .show(truncate=False)
+else:
+    print("⏭️ Skipping Segment Distribution sample - table not created")
 
 # COMMAND ----------
 
