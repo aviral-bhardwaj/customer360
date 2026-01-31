@@ -19,7 +19,7 @@
 # MAGIC - Bronze Delta tables (from `01_bronze_ingestion`)
 # MAGIC
 # MAGIC ## Output
-# MAGIC - Silver Delta tables with `silver_` prefix
+# MAGIC - Silver Delta tables in `silver` schema (e.g., `customer360_demo.silver.customers`)
 # MAGIC
 # MAGIC ---
 # MAGIC **Schedule**: Runs after Bronze ingestion completes
@@ -480,7 +480,8 @@ def run_silver_transformations() -> Dict[str, Dict]:
     print(f"Start Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()
 
-    setup_database()
+    # Setup silver schema (creates if not exists)
+    setup_layer_schema("silver")
 
     results = {}
 
@@ -649,16 +650,16 @@ spark.table(get_full_table_name("transactions", "silver")) \
 # MAGIC %md
 # MAGIC ## Pipeline Complete
 # MAGIC
-# MAGIC Silver layer transformation is complete. The following tables are now available:
+# MAGIC Silver layer transformation is complete. Tables created in `customer360_demo.silver` schema:
 # MAGIC
 # MAGIC | Table | Grain | Description |
 # MAGIC |-------|-------|-------------|
-# MAGIC | `silver_customers` | customer_id | Standardized customer profiles |
-# MAGIC | `silver_transactions` | transaction_id | Unified online + in-store transactions |
-# MAGIC | `silver_loyalty` | loyalty_id | Enriched loyalty data with tier ranks |
-# MAGIC | `silver_service_interactions` | interaction_id | Support tickets with resolution flags |
-# MAGIC | `silver_customer_insights` | customer_id + session | Demographics and purchase behavior |
-# MAGIC | `silver_products` | product_id | Product catalog with price tiers |
-# MAGIC | `silver_stores` | store_id | Store locations |
+# MAGIC | `silver.customers` | customer_id | Standardized customer profiles |
+# MAGIC | `silver.transactions` | transaction_id | Unified online + in-store transactions |
+# MAGIC | `silver.loyalty` | loyalty_id | Enriched loyalty data with tier ranks |
+# MAGIC | `silver.service_interactions` | interaction_id | Support tickets with resolution flags |
+# MAGIC | `silver.customer_insights` | customer_id + session | Demographics and purchase behavior |
+# MAGIC | `silver.products` | product_id | Product catalog with price tiers |
+# MAGIC | `silver.stores` | store_id | Store locations |
 # MAGIC
 # MAGIC **Next Step**: Run `03_gold_analytics` to create analytics-ready aggregated tables.

@@ -17,7 +17,7 @@
 # MAGIC - Raw CSV files from configured data paths
 # MAGIC
 # MAGIC ## Output
-# MAGIC - Bronze Delta tables with `bronze_` prefix
+# MAGIC - Bronze Delta tables in `bronze` schema (e.g., `customer360_demo.bronze.customers`)
 # MAGIC
 # MAGIC ---
 # MAGIC **Schedule**: Daily (or triggered on new file arrival)
@@ -291,8 +291,8 @@ def run_bronze_ingestion(discovered_files: Dict[str, Dict]) -> Dict[str, Dict]:
     print(f"Write Mode: {WRITE_MODE}")
     print()
 
-    # Setup database/catalog
-    setup_database()
+    # Setup bronze schema (creates if not exists)
+    setup_layer_schema("bronze")
 
     ingestion_results = {}
     success_count = 0
@@ -389,20 +389,20 @@ verify_bronze_tables(bronze_results)
 # MAGIC %md
 # MAGIC ## Pipeline Complete
 # MAGIC
-# MAGIC Bronze layer ingestion is complete. The following tables are now available:
+# MAGIC Bronze layer ingestion is complete. Tables created in `customer360_demo.bronze` schema:
 # MAGIC
 # MAGIC | Table | Description |
 # MAGIC |-------|-------------|
-# MAGIC | `bronze_customers` | Customer master data |
-# MAGIC | `bronze_products` | Product catalog |
-# MAGIC | `bronze_stores` | Store locations |
-# MAGIC | `bronze_agents` | Support agents |
-# MAGIC | `bronze_online_transactions` | E-commerce transactions |
-# MAGIC | `bronze_instore_transactions` | In-store purchases |
-# MAGIC | `bronze_loyalty_accounts` | Loyalty membership |
-# MAGIC | `bronze_loyalty_transactions` | Points activity |
-# MAGIC | `bronze_service_interactions` | Support tickets |
-# MAGIC | `bronze_customer_insights` | Comprehensive analytics |
-# MAGIC | `bronze_shopping_behavior` | Shopping patterns |
+# MAGIC | `bronze.customers` | Customer master data |
+# MAGIC | `bronze.products` | Product catalog |
+# MAGIC | `bronze.stores` | Store locations |
+# MAGIC | `bronze.agents` | Support agents |
+# MAGIC | `bronze.online_transactions` | E-commerce transactions |
+# MAGIC | `bronze.instore_transactions` | In-store purchases |
+# MAGIC | `bronze.loyalty_accounts` | Loyalty membership |
+# MAGIC | `bronze.loyalty_transactions` | Points activity |
+# MAGIC | `bronze.service_interactions` | Support tickets |
+# MAGIC | `bronze.customer_insights` | Comprehensive analytics |
+# MAGIC | `bronze.shopping_behavior` | Shopping patterns |
 # MAGIC
 # MAGIC **Next Step**: Run `02_silver_transformation` to create cleaned and conformed tables.

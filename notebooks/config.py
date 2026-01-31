@@ -33,10 +33,16 @@ BASE_RAW_PATH = "/Workspace/Repos/customer360/data"
 
 # Unity Catalog settings
 CATALOG_NAME = "customer360_demo"
-SCHEMA_NAME = "analytics"
 
-# Legacy database name (if not using Unity Catalog)
-DATABASE_NAME = "customer360_db"
+# Separate schemas for each Medallion layer
+BRONZE_SCHEMA = "bronze"
+SILVER_SCHEMA = "silver"
+GOLD_SCHEMA = "gold"
+
+# Legacy database names (if not using Unity Catalog)
+BRONZE_DATABASE = "customer360_bronze"
+SILVER_DATABASE = "customer360_silver"
+GOLD_DATABASE = "customer360_gold"
 
 # Use Unity Catalog (set to False for legacy Hive metastore)
 USE_UNITY_CATALOG = True
@@ -75,15 +81,6 @@ FILE_TO_TABLE_MAPPING = {
 }
 
 # =============================================================================
-# TABLE NAMING CONVENTIONS
-# =============================================================================
-
-# Prefixes for each layer
-BRONZE_PREFIX = "bronze_"
-SILVER_PREFIX = "silver_"
-GOLD_PREFIX = "gold_"
-
-# =============================================================================
 # PROCESSING CONFIGURATION
 # =============================================================================
 
@@ -101,47 +98,87 @@ WRITE_MODE = INITIAL_LOAD_MODE
 
 # COMMAND ----------
 
-def get_full_table_name(table_name: str, layer: str = None) -> str:
+def get_schema_for_layer(layer: str) -> str:
+    """
+    Get the schema/database name for a specific layer.
+
+    Args:
+        layer: 'bronze', 'silver', or 'gold'
+
+    Returns:
+        Schema name for Unity Catalog or database name for Hive
+    """
+    if USE_UNITY_CATALOG:
+        schema_map = {
+            "bronze": BRONZE_SCHEMA,
+            "silver": SILVER_SCHEMA,
+            "gold": GOLD_SCHEMA
+        }
+    else:
+        schema_map = {
+            "bronze": BRONZE_DATABASE,
+            "silver": SILVER_DATABASE,
+            "gold": GOLD_DATABASE
+        }
+    return schema_map.get(layer, BRONZE_SCHEMA)
+
+
+def get_full_table_name(table_name: str, layer: str) -> str:
     """
     Get the fully qualified table name based on catalog/schema settings.
 
     Args:
-        table_name: Base table name (without layer prefix)
-        layer: Optional layer prefix ('bronze', 'silver', 'gold')
+        table_name: Base table name (e.g., 'customers', 'transactions')
+        layer: Layer name ('bronze', 'silver', 'gold')
 
     Returns:
-        Fully qualified table name
+        Fully qualified table name (e.g., 'customer360_demo.silver.customers')
     """
-    # Add layer prefix if specified
-    if layer:
-        prefix_map = {
-            "bronze": BRONZE_PREFIX,
-            "silver": SILVER_PREFIX,
-            "gold": GOLD_PREFIX
-        }
-        table_name = f"{prefix_map.get(layer, '')}{table_name}"
+    schema = get_schema_for_layer(layer)
 
     if USE_UNITY_CATALOG:
-        return f"{CATALOG_NAME}.{SCHEMA_NAME}.{table_name}"
+        return f"{CATALOG_NAME}.{schema}.{table_name}"
     else:
-        return f"{DATABASE_NAME}.{table_name}"
+        return f"{schema}.{table_name}"
 
 
-def setup_database():
+def setup_layer_schema(layer: str) -> None:
     """
-    Create the database/schema for the medallion layers.
-    Must be called before writing any tables.
+    Create the schema/database for a specific layer if it doesn't exist.
+
+    Args:
+        layer: 'bronze', 'silver', or 'gold'
     """
+    schema = get_schema_for_layer(layer)
+
     if USE_UNITY_CATALOG:
-        spark.sql(f"CREATE CATALOG IF NOT EXISTS {CATALOG_NAME}")
-        spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG_NAME}.{SCHEMA_NAME}")
+        # Check if catalog exists, if not inform user to create it manually
+        try:
+            catalogs = [row.catalog for row in spark.sql("SHOW CATALOGS").collect()]
+            if CATALOG_NAME not in catalogs:
+                print(f"⚠️  Catalog '{CATALOG_NAME}' does not exist.")
+                print(f"   Please create it manually in Databricks UI or run:")
+                print(f"   CREATE CATALOG {CATALOG_NAME}")
+                raise Exception(f"Catalog '{CATALOG_NAME}' not found. Please create it first.")
+        except Exception as e:
+            if "SHOW CATALOGS" in str(e):
+                # If SHOW CATALOGS fails, try to use the catalog directly
+                pass
+            elif "not found" in str(e).lower():
+                raise e
+
+        # Use the catalog
         spark.sql(f"USE CATALOG {CATALOG_NAME}")
-        spark.sql(f"USE SCHEMA {SCHEMA_NAME}")
-        print(f"✅ Using Unity Catalog: {CATALOG_NAME}.{SCHEMA_NAME}")
+
+        # Create schema if not exists
+        spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG_NAME}.{schema}")
+        spark.sql(f"USE SCHEMA {schema}")
+        print(f"✅ Using Unity Catalog: {CATALOG_NAME}.{schema}")
     else:
-        spark.sql(f"CREATE DATABASE IF NOT EXISTS {DATABASE_NAME}")
-        spark.sql(f"USE {DATABASE_NAME}")
-        print(f"✅ Using database: {DATABASE_NAME}")
+        # Legacy Hive metastore
+        spark.sql(f"CREATE DATABASE IF NOT EXISTS {schema}")
+        spark.sql(f"USE {schema}")
+        print(f"✅ Using database: {schema}")
 
 
 def print_config():
@@ -153,9 +190,13 @@ def print_config():
     print(f"Unity Catalog:     {USE_UNITY_CATALOG}")
     if USE_UNITY_CATALOG:
         print(f"Catalog:           {CATALOG_NAME}")
-        print(f"Schema:            {SCHEMA_NAME}")
+        print(f"Bronze Schema:     {BRONZE_SCHEMA}")
+        print(f"Silver Schema:     {SILVER_SCHEMA}")
+        print(f"Gold Schema:       {GOLD_SCHEMA}")
     else:
-        print(f"Database:          {DATABASE_NAME}")
+        print(f"Bronze Database:   {BRONZE_DATABASE}")
+        print(f"Silver Database:   {SILVER_DATABASE}")
+        print(f"Gold Database:     {GOLD_DATABASE}")
     print(f"Write Mode:        {WRITE_MODE}")
     print("=" * 60)
 
