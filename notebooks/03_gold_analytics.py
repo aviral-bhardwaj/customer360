@@ -17,12 +17,12 @@
 # MAGIC - Silver Delta tables (from `02_silver_transformation`)
 # MAGIC
 # MAGIC ## Output
-# MAGIC - Gold Delta tables with `gold_` prefix:
-# MAGIC   - `gold_customer_360` - Unified customer profile
-# MAGIC   - `gold_customer_segments` - RFM segmentation
-# MAGIC   - `gold_customer_clv` - Customer lifetime value
-# MAGIC   - `gold_campaign_performance` - Campaign analytics
-# MAGIC   - `gold_daily_metrics` - Daily KPIs
+# MAGIC - Gold Delta tables in `gold` schema (e.g., `customer360_demo.gold.customer_360`):
+# MAGIC   - `gold.customer_360` - Unified customer profile
+# MAGIC   - `gold.customer_segments` - RFM segmentation
+# MAGIC   - `gold.customer_clv` - Customer lifetime value
+# MAGIC   - `gold.campaign_performance` - Campaign analytics
+# MAGIC   - `gold.daily_metrics` - Daily KPIs
 # MAGIC
 # MAGIC ---
 # MAGIC **Schedule**: Runs after Silver transformation completes
@@ -230,6 +230,11 @@ def build_gold_customer_360() -> DataFrame:
     })
 
     return customer_360
+
+# COMMAND ----------
+
+# Setup gold schema (creates if not exists)
+setup_layer_schema("gold")
 
 # COMMAND ----------
 
@@ -683,10 +688,12 @@ if campaign_df is not None:
 # MAGIC
 # MAGIC ### Table Summary
 # MAGIC
+# MAGIC Tables created in `customer360_demo.gold` schema:
+# MAGIC
 # MAGIC | Table | Grain | Use Case |
 # MAGIC |-------|-------|----------|
-# MAGIC | `gold_customer_360` | customer_id | Single customer view, support tools |
-# MAGIC | `gold_customer_segments` | customer_id | Marketing targeting, personalization |
-# MAGIC | `gold_customer_clv` | customer_id | Investment prioritization, retention |
-# MAGIC | `gold_campaign_performance` | campaign_source | Marketing ROI, budget allocation |
-# MAGIC | `gold_daily_metrics` | transaction_date | Trend analysis, forecasting |
+# MAGIC | `gold.customer_360` | customer_id | Single customer view, support tools |
+# MAGIC | `gold.customer_segments` | customer_id | Marketing targeting, personalization |
+# MAGIC | `gold.customer_clv` | customer_id | Investment prioritization, retention |
+# MAGIC | `gold.campaign_performance` | campaign_source | Marketing ROI, budget allocation |
+# MAGIC | `gold.daily_metrics` | transaction_date | Trend analysis, forecasting |
