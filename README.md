@@ -498,7 +498,7 @@ Contains all configurable parameters used across pipelines:
 
 ## License
 
-This demo is provided for educational and demonstration purposes.
+This demo is provided for educational and demonstration purposes created by Aviral Bhardwaj and Vrahad Analytics LLC.
 
 ## Contact
 
